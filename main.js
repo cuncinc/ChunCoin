@@ -52,6 +52,14 @@ class Block {
     return sha256(this.data + this.nonce + this.timestamp + this.previousBlockHash).toString();
   }
 
+  mineBlock(difficulty) {
+    while (this.hash.substring(0, difficulty) !== Array(difficulty + 1).join("0")) {
+      this.nonce++;
+      this.hash = this.calculateHash();
+    }
+    console.log('Block mined:', this.nonce, this.hash);
+  }
+
   //验证交易是否有效
   isTransactionsValid() {
     let data = JSON.parse(this.data);
@@ -63,6 +71,19 @@ class Block {
       if (!tran.isValid()) {
         return false;
       }
+    }
+    return true;
+  }
+
+  isBlockValid(previousBlock) {
+    if (this.hash !== this.calculateHash()) {
+      return false;
+    }
+    if (this.previousBlockHash !== previousBlock.hash) {
+      return false;
+    }
+    if (!this.isTransactionsValid()) {
+      return false;
     }
     return true;
   }
@@ -85,29 +106,28 @@ class Blockchain {
     return this.chain[this.chain.length - 1];
   }
 
-  addBlock(data) {
-    let newBlock = new Block(data, this.getLatestBlock().hash);
-    this.chain.push(newBlock);
+  submitBlock(block) {
+    this.chain.push(block);
   }
 
   isChainValid() {
     for (let i = this.chain.length - 1; i > 0; --i) {
-      const currentBlock = this.chain[i];
-      const previousBlock = this.chain[i - 1];
-      if (currentBlock.hash !== currentBlock.calculateHash()) {
-        return false;
-      }
-      if (currentBlock.previousBlockHash !== previousBlock.hash) {
+      let currentBlock = this.chain[i];
+      let previousBlock = this.chain[i - 1];
+      if (!currentBlock.isBlockValid(previousBlock)) {
         return false;
       }
     }
     return true;
   }
 
-  mineBlock(minerAddress) {
+  mine(minerAddress) {
+    if (this.pendingTransactions.length === 0) {
+      console.log('Mine info: oo transactions to mine');
+      return;
+    }
     //矿工奖励
-    this.pendingTransactions.push(new Transaction(null, minerAddress, this.miningReward));
-
+    this.submitTransaction(new Transaction(null, minerAddress, this.miningReward));
     //交易验证
     for (let tran of this.pendingTransactions) {
       if (!tran.isValid()) {
@@ -115,18 +135,13 @@ class Blockchain {
         return;
       }
     }
-
     //打包交易
     let data = JSON.stringify(this.pendingTransactions);
-    //挖矿
     let newBlock = new Block(data, this.getLatestBlock().hash);
-    while (newBlock.hash.substring(0, this.difficulty) !== Array(this.difficulty + 1).join("0")) {
-      newBlock.nonce++;
-      newBlock.hash = newBlock.calculateHash();
-    }
+    //挖矿
+    newBlock.mineBlock(this.difficulty);
     //添加到链上
-    console.log(newBlock.nonce, newBlock.hash);
-    this.chain.push(newBlock);
+    this.submitBlock(newBlock);
     //清空交易池，应该放在挖矿之后
     this.pendingTransactions = [];
   }
@@ -201,16 +216,14 @@ function main() {
 
   chunCoin.submitTransaction(tran1);
   chunCoin.submitTransaction(tran2);
+  chunCoin.mine(miner.address);
 
-  chunCoin.mineBlock(miner.address);
+  chunCoin.mine(miner.address);
 
-  chunCoin.mineBlock(miner.address);
-
-  console.log("Is chain valid? " + chunCoin.isChainValid());
-  console.log("Is block_1 valid? " + chunCoin.chain[1].isTransactionsValid());
-  console.log("balance of alice: " + chunCoin.balanceOfAddress(alice.address));
-
-  console.log(chunCoin.chain);
+  // console.log("Is chain valid? " + chunCoin.isChainValid());
+  // console.log("Is block_1 valid? " + chunCoin.chain[1].isTransactionsValid());
+  // console.log("balance of alice: " + chunCoin.balanceOfAddress(alice.address));
+  // console.log(chunCoin.chain);
 }
 
 main();
