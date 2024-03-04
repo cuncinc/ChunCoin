@@ -1,130 +1,8 @@
-const sha256 = require('crypto-js/sha256');
-const ecLib = require('elliptic').ec;
-const ec = new ecLib('secp256k1');
-const fs = require('fs');
 const WebSocket = require('ws');
-
-
-class Wallet {
-  sendMoney(amount, to) {
-    const tran = new Transaction(this.address, to, amount);
-    tran.sign(this.keyPair);
-    return tran;
-  }
-
-  saveWallet2File(filename) {
-    let wallet = JSON.stringify(this.keyPair);
-    fs.writeFileSync(filename, wallet);
-  }
-
-  static generateWallet() {
-    const keyPair = ec.genKeyPair();
-    const wallet = new Wallet();
-    wallet.keyPair = keyPair;
-    wallet.address = keyPair.getPublic('hex');
-    console.log('New address:', wallet.address);
-    return wallet;
-  }
-
-  static loadFromFile(filename) {
-    let wallet = new Wallet();
-    let content = fs.readFileSync(filename);
-    wallet.keyPair = ec.keyFromPrivate(JSON.parse(content).priv, 'hex');
-    wallet.address = wallet.keyPair.getPublic('hex');
-    return wallet;
-  }
-}
-
-class Transaction {
-  constructor(from, to, amount) {
-    this.from = from;
-    this.to = to;
-    this.amount = amount;
-    this.timestamp = Date.now();
-    this.signature = '';
-  }
-
-  calculateHash() {
-    return sha256(this.from + this.to + this.amount + this.timestamp).toString();
-  }
-
-  sign(keyPair) {
-    if (keyPair.getPublic('hex') !== this.from) {
-      throw new Error('You cannot sign transactions for other wallets!');
-    }
-    let hashTx = this.calculateHash();
-    this.signature = keyPair.sign(hashTx, 'base64').toDER('hex');
-  }
-
-  //验证交易是否有效
-  isTransactionValid() {
-    if (this.from === null) return true;
-    if (!this.signature || this.signature.length === 0) {
-      throw new Error('No signature in this transaction');
-    }
-    const publicKey = ec.keyFromPublic(this.from, 'hex');
-    return publicKey.verify(this.calculateHash(), this.signature);
-  }
-
-  toString() {
-    return JSON.stringify(this);
-  }
-}
-
-class Block {
-  constructor(data, previousBlock) {
-    this.data = data;
-    this.nonce = 1;
-    this.height = previousBlock ? previousBlock.height + 1 : 0;
-    this.timestamp = Date.now();
-    this.previousBlockHash = previousBlock ? previousBlock.hash : '';
-    this.hash = this.calculateHash();
-  }
-
-  calculateHash() {
-    return sha256(this.data + this.nonce + this.height + this.timestamp + this.previousBlockHash).toString();
-  }
-
-  mineBlock(difficulty) {
-    while (this.hash.substring(0, difficulty) !== Array(difficulty + 1).join("0")) {
-      this.nonce++;
-      this.hash = this.calculateHash();
-    }
-    console.log('Block mined:', this.height, this.nonce, this.hash);
-  }
-
-  //验证交易是否有效
-  isTransactionsValid() {
-    let data = JSON.parse(this.data);
-    for (let tran of data) {
-      //判断tran是否是Transaction的实例
-      if (!(tran instanceof Transaction)) {
-        continue;
-      }
-      if (!tran.isTransactionValid()) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  isBlockValid(previousBlock) {
-    if (this.hash !== this.calculateHash()) {
-      return false;
-    }
-    if (this.previousBlockHash !== previousBlock.hash) {
-      return false;
-    }
-    if (!this.isTransactionsValid()) {
-      return false;
-    }
-    return true;
-  }
-}
+const { Block, Transaction, Wallet } = require('./block');
 
 
 class Blockchain {
-
   constructor() {
     this.chain = [this.createGenesisBlock()];
     this.pendingTransactions = [];
@@ -163,24 +41,25 @@ class Blockchain {
         let localHeight = this.getLatestBlock().height;
 
         if (localHeight === 0) { //本地只有创世区块，覆盖之
+          console.log('Local height is 0, replace with remote blocks');
           this.chain = [blocks[0]];
         }
 
         for (let b of blocks) {
           let block = Object.assign(new Block(), b);
-          // if (block.isBlockValid(this.getLatestBlock())) {
-          this.chain.push(block);
-          //清除已经被打包的交易
-          // this.pendingTransactions = this.pendingTransactions.filter(tran => !block.data.includes(tran));
-          console.log('Sync block:', this.getLatestBlock().height);
-          // }
+          if (block.isBlockValid(this.getLatestBlock())) {
+            this.chain.push(block);
+            //清除已经被打包的交易
+            // this.pendingTransactions = this.pendingTransactions.filter(tran => !block.data.includes(tran));
+            console.log('Sync block:', block.height);
+          }
         }
       }
     });
   }
 
   syncChain() {
-    let message = { type: 'node_sync', data: this.getLatestBlock().height }
+    let message = { type: 'node_sync', data: this.getLatestBlock() };
     this.ws.send(JSON.stringify(message));
   }
 
@@ -223,14 +102,13 @@ class Blockchain {
       await new Promise((resolve) => {
         setTimeout(() => {
           resolve();
-        }); // 设置一个适当的延迟，以避免过度消耗CPU资源
+        });
       });
 
-
-      // if (this.pendingTransactions.length === 0) {
-      //   console.log('Mine info: no transactions to mine');
-      //   continue;
-      // }
+      if (this.pendingTransactions.length === 0) {
+        // console.log('Mine info: no transactions to mine');
+        continue;
+      }
       //矿工奖励
       this.pendingTransactions.push(new Transaction(null, minerAddress, this.miningReward));
       //交易验证
@@ -243,14 +121,15 @@ class Blockchain {
       }
       //打包交易
       //复制交易池
-      let trans = this.pendingTransactions.slice();
-      let newBlock = new Block(trans, this.getLatestBlock());
+      let packagedTrans = this.pendingTransactions.slice();
+      let newBlock = new Block(packagedTrans, this.getLatestBlock());
+      newBlock.isBlockValid(this.getLatestBlock());
       //挖矿
       newBlock.mineBlock(this.difficulty);
       //添加到链上
       this.submitBlock(newBlock);
       //将在新区块中被打包的交易从交易池中移除
-      this.pendingTransactions = this.pendingTransactions.filter(t => trans.indexOf(t) === -1);
+      this.pendingTransactions = this.pendingTransactions.filter(t => packagedTrans.indexOf(t) === -1);
     }
   }
 
@@ -300,7 +179,7 @@ function main() {
     receiver = Math.random() > 0.5 ? miner : bob;
     tran = alice.sendMoney(amount, receiver.address);
     chunCoin.submitTransaction(tran);
-  }, 3000);
+  }, 8000);
 }
 
 main();
