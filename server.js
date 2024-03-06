@@ -29,13 +29,13 @@ wss.on('connection', ws => {
 
     if (type === 'new_block') {
       let block = Object.assign(new Block(), msg.data);
-      console.log(block);
+      console.log(block.height, block.nonce, block.hash);
       if (block.isBlockValid(blockchain[blockchain.length - 1])) {
-        console.log('block valid');
+        console.log('block valid', block.nonce);
         blockchain.push(block);
       }
       else {
-        console.log('block invalid');
+        console.log('Invalid block', block.nonce);
       }
       wss.broadcast(ws, message);
     }

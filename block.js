@@ -118,7 +118,7 @@ class Block {
       console.log('Block hash is invalid:', this.hash, this.calculateHash());
       return false;
     }
-    if (this.previousBlockHash !== previousBlock.hash) {
+    if (previousBlock !== null && this.previousBlockHash !== previousBlock.hash) {
       console.log('Previous block hash is invalid:', this.previousBlockHash);
       return false;
     }

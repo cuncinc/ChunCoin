@@ -7,7 +7,7 @@ class Blockchain {
     this.chain = [this.createGenesisBlock()];
     this.pendingTransactions = [];
     this.miningReward = 50;
-    this.difficulty = 4;
+    this.difficulty = 5;
     this.ws = null;
     this.wsInit();
   }
@@ -37,20 +37,21 @@ class Blockchain {
       }
       else if (type === 'node_sync_rsp') {
         console.log('node_sync_rsp');
-        let blocks = msg.data;
+        let receivedBlocks = msg.data;
         let localHeight = this.getLatestBlock().height;
 
         if (localHeight === 0) { //本地只有创世区块，覆盖之
           console.log('Local height is 0, replace with remote blocks');
-          this.chain = [blocks[0]];
+          this.chain = [receivedBlocks[0]];
+          // console.log(receivedBlocks)
         }
 
-        for (let b of blocks) {
+        for (let b of receivedBlocks) {
           let block = Object.assign(new Block(), b);
           if (block.isBlockValid(this.getLatestBlock())) {
             this.chain.push(block);
             //清除已经被打包的交易
-            // this.pendingTransactions = this.pendingTransactions.filter(tran => !block.data.includes(tran));
+            this.pendingTransactions = this.pendingTransactions.filter(tran => !block.data.includes(tran));
             console.log('Sync block:', block.height);
           }
         }
@@ -64,10 +65,17 @@ class Blockchain {
   }
 
   createGenesisBlock() {
-    return new Block("Genesis Block", null);
+    console.log('Create genesis block');
+    //创世区块的交易：给创建者5000个币
+    let me = Wallet.loadFromFile('wallet/miner.wallet');
+    let t = new Transaction(null, me.address, 5000);
+    return new Block([t], null);
   }
 
   getLatestBlock() {
+    if (this.chain.length === 0) {
+      return null;
+    }
     return this.chain[this.chain.length - 1];
   }
 
@@ -126,6 +134,11 @@ class Blockchain {
       newBlock.isBlockValid(this.getLatestBlock());
       //挖矿
       newBlock.mineBlock(this.difficulty);
+      //验证新区块
+      if (!newBlock.isBlockValid(this.getLatestBlock())) {
+        console.log('Mined block invalid');
+        continue;
+      }
       //添加到链上
       this.submitBlock(newBlock);
       //将在新区块中被打包的交易从交易池中移除
@@ -179,7 +192,7 @@ function main() {
     receiver = Math.random() > 0.5 ? miner : bob;
     tran = alice.sendMoney(amount, receiver.address);
     chunCoin.submitTransaction(tran);
-  }, 8000);
+  }, 6000);
 }
 
 main();
